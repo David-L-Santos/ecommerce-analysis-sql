@@ -4,7 +4,7 @@ Projeto de análise de dados com SQL utilizando como DBMS o MySQL, simulando o t
 
 ## Sobre o projeto
 
-Depois do projeto de risco de crédito, quis praticar em um cenário diferente, mais próximo do dia a dia de e-commerce/varejo: entender quais categorias vendem mais, como os clientes avaliam os pedidos, quais estados gastam mais e como estão os status das entregas. Também usei esse projeto para evoluir de subquery simples para CTE encadeada (WITH) e CROSS JOIN, que não tinha usado ainda no projeto anterior.
+Depois do projeto de risco de crédito, quis praticar em um cenário diferente, mais próximo do dia a dia de e-commerce/varejo: entender quais categorias vendem mais, como os clientes avaliam os pedidos, quais estados gastam mais e como estão os status das entregas. Também usei esse projeto para evoluir de subquery simples para CTE encadeada (WITH), CROSS JOIN e Window Functions (RANK, ROW_NUMBER, AVG OVER), que não tinha usado ainda no projeto anterior.
 
 ## Dataset
 
@@ -118,9 +118,87 @@ ORDER BY gpe.soma DESC;
 ```
 Aqui dá pra ver claramente que SP concentra o maior volume de gasto, bem acima da média nacional, enquanto boa parte dos outros estados fica abaixo.
 
+## Window Functions
+
+Depois de fechar CTE e CROSS JOIN, aprofundei em Window Functions (RANK, ROW_NUMBER, AVG OVER), que permitem calcular algo por grupo sem esconder o detalhe de cada linha, diferente do GROUP BY.
+
+**6. Ranking de produtos por preço dentro de cada categoria**
+
+```sql
+SELECT product_id, product_category_name, price,
+    RANK() OVER(PARTITION BY product_category_name ORDER BY price DESC) AS posicao
+FROM products p
+JOIN order_items oi USING(product_id)
+WHERE product_category_name IS NOT NULL
+    AND product_category_name != '';
+```
+RANK numera os produtos do mais caro pro mais barato dentro de cada categoria, repetindo a posição em caso de empate.
+
+**7. Variação de preço por produto ao longo das vendas**
+
+```sql
+SELECT product_id, price,
+    ROW_NUMBER() OVER(PARTITION BY product_id ORDER BY price DESC) AS posicao
+FROM order_items
+WHERE product_id IN (
+    SELECT product_id FROM order_items
+    GROUP BY product_id
+    HAVING COUNT(DISTINCT price) > 1
+);
+```
+Filtrei só produtos que de fato foram vendidos por preços diferentes ao longo do tempo, senão o ranking ficaria sempre "1" pra todo mundo (sem variação, não tem o que ranquear).
+
+**8. Ranking de itens dentro de pedidos com mais de 1 item**
+
+```sql
+SELECT order_id, price,
+    RANK() OVER(PARTITION BY order_id ORDER BY price DESC) AS posicao
+FROM order_items
+WHERE order_id IN (
+    SELECT order_id FROM order_items
+    GROUP BY order_id
+    HAVING COUNT(*) > 1
+)
+ORDER BY order_id;
+```
+Mesma lógica, mas olhando pra dentro de cada pedido: mostra o item mais caro e mais barato quando o pedido tem mais de um produto.
+
+**9. Classificação por faixa de peso, com ranking interno**
+
+```sql
+WITH produtos_peso AS (
+    SELECT product_id, product_weight_g,
+        CASE
+            WHEN product_weight_g IS NULL OR product_weight_g = 0 THEN 'NULO'
+            WHEN product_weight_g <= 500 THEN 'LEVE'
+            WHEN product_weight_g BETWEEN 501 AND 700 THEN 'MEDIO'
+            ELSE 'PESADO'
+        END AS categoria_peso
+    FROM products
+)
+SELECT product_id, product_weight_g AS peso_gramas, categoria_peso,
+    ROW_NUMBER() OVER(PARTITION BY categoria_peso ORDER BY product_weight_g) AS posicao
+FROM produtos_peso
+ORDER BY peso_gramas;
+```
+Aqui juntei CASE WHEN com ROW_NUMBER: primeiro classifico o produto por faixa de peso (tratando peso nulo/zero antes das outras faixas, pra não ser capturado incorretamente como "LEVE"), depois ranqueio dentro de cada faixa.
+
+**10. Preço do item comparado à média da categoria**
+
+```sql
+SELECT product_id, product_category_name, price,
+    ROUND(AVG(price) OVER(PARTITION BY product_category_name), 2) AS media_categoria,
+    ROUND(price - AVG(price) OVER(PARTITION BY product_category_name), 2) AS diferenca_da_media
+FROM products p
+JOIN order_items oi USING(product_id)
+WHERE product_category_name IS NOT NULL
+    AND product_category_name != '';
+```
+Diferente das anteriores, essa usa uma função agregada (AVG) como window function, mostrando o preço de cada item lado a lado com a média da categoria dele, sem precisar de GROUP BY.
+
 ## O que aprendi
 
-Esse projeto foi onde consolidei CTE dupla e CROSS JOIN, que ainda não tinha usado no projeto de risco de crédito. Pretendo seguir evoluindo cada vez mais em SQL para assim poder aplicar no meu dia a dia no trabalho, próximo passo é entender Window Function e aperfeiçoar meus conhecimentos.
+Esse projeto foi onde consolidei CTE dupla, CROSS JOIN e Window Functions, que ainda não tinha usado no projeto de risco de crédito. Pretendo seguir evoluindo cada vez mais em SQL para assim poder aplicar no meu dia a dia no trabalho, e agora sigo para Excel, buscando chegar a um nível intermediário.
 
 ## Autor
 
